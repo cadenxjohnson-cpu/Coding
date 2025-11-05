@@ -1,7 +1,6 @@
-""" text based game that uses functions from gamefunctions.py
+"""
+text based adventure game that uses functions from gamefunctions.py
 
-Asks the player's name, displays a simple shop, allows fighting
-monsters, sleeping to restore HP, and quitting the game.
 """
 
 from __future__ import annotations
@@ -9,8 +8,8 @@ import random
 import gamefunctions as gf
 
 
-def fight_monster(name, hp, gold):
-    """ monster fight loop."""
+def fight_monster(name, hp, gold, inventory):
+    """Monster fight loop."""
     monster = gf.random_monster()
     print(f"\nA wild {monster['name']} appears (HP {monster['health']}, Power {monster['power']})")
 
@@ -24,21 +23,38 @@ def fight_monster(name, hp, gold):
             monster_hit = random.randint(2, monster["power"])
             monster["health"] -= player_hit
             hp -= monster_hit
-            print(f"You hit for {player_hit} The monster hits back for {monster_hit}")
+            print(f"You hit for {player_hit}. The monster hits back for {monster_hit}.")
         elif action == "2":
-            print("You ran away!")
+            print("You ran away")
             break
         else:
-            print("Error")
+            print("Error.")
 
     if hp <= 0:
-        print("You fainted, You wake up back in town with 10 HP")
+        print("You fainted, You wake up back in town with 10 HP.")
         hp = 10
     elif monster["health"] <= 0:
-        print(f"You defeated the {monster['name']} and earned {monster['money']} gold")
+        print(f"You defeated the {monster['name']} and earned {monster['money']} gold.")
         gold += monster["money"]
 
-    return hp, gold
+        # Chance to get an item drop
+        if random.random() < 0.5:
+            item = {"name": "Sword", "type": "weapon", "maxDurability": 10, "currentDurability": 10}
+            inventory.append(item)
+            print(f"You found a {item['name']}")
+
+    return hp, gold, inventory
+
+
+def view_inventory(inventory):
+    """Display all items in inventory"""
+    if not inventory:
+        print("\nYour inventory is empty")
+        return
+    print("\n--- Inventory ---")
+    for i, item in enumerate(inventory, 1):
+        info = ", ".join([f"{k}: {v}" for k, v in item.items()])
+        print(f"{i}) {info}")
 
 
 def main():
@@ -48,29 +64,33 @@ def main():
 
     hp = 30
     gold = 10
+    inventory = []
 
     while True:
         print(f"\nYou are in town.\nCurrent HP: {hp}, Gold: {gold}")
         print("1) Leave town (Fight Monster)")
         print("2) Sleep (Restore HP for 5 Gold)")
-        print("3) Quit")
+        print("3) View Inventory")
+        print("4) Quit")
 
         choice = input("Choose: ").strip()
 
         if choice == "1":
-            hp, gold = fight_monster(name, hp, gold)
+            hp, gold, inventory = fight_monster(name, hp, gold, inventory)
         elif choice == "2":
             if gold >= 5:
                 gold -= 5
                 hp = 30
-                print("You rest and feel refreshed HP fully restored")
+                print("You rest and feel refreshed. HP fully restored!")
             else:
-                print("Not enough gold to rest")
+                print("Not enough gold to rest.")
         elif choice == "3":
-            print("Bye")
+            view_inventory(inventory)
+        elif choice == "4":
+            print("Bye!")
             break
         else:
-            print("Error try again.")
+            print("Error, try again.")
 
 
 if __name__ == "__main__":
