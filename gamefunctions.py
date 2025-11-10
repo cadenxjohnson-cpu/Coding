@@ -24,6 +24,7 @@ Typical usage example:
 
 from __future__ import annotations
 
+import json
 import random
 from typing import Dict, List, Tuple
 
@@ -172,6 +173,29 @@ def test_functions() -> None:
     print(f"Encountered: {m['name']} (HP {m['health']}, PWR {m['power']})")
     print(f"Loot: ${m['money']:.2f}")
     print(m['description'])
+
+
+def save_game(filename, inventory, gold, hp):
+    """Save the current game state to a file in JSON format."""
+    game_state = {
+        "inventory": inventory,
+        "gold": gold,
+        "hp": hp
+    }
+    with open(filename, 'w') as file:
+        json.dump(game_state, file)
+    print(f"Game saved successfully as {filename}!")
+
+def load_game(filename):
+    """Load a previously saved game from a file."""
+    try:
+        with open(filename, 'r') as file:
+            game_state = json.load(file)
+        print(f"Game loaded successfully from {filename}!")
+        return game_state
+    except FileNotFoundError:
+        print("Save file not found. Starting a new game instead.")
+        return {"inventory": [], "gold": 10, "hp": 30}
 
 
 if __name__ == "__main__":
