@@ -59,19 +59,31 @@ def view_inventory(inventory):
 
 def main():
     """Main game loop."""
-    name = input("Enter your name: ").strip() or "Adventurer"
-    gf.print_welcome(name)
+    print("Welcome to the Adventure Game!")
+    print("1) Start New Game")
+    print("2) Load Saved Game")
+    start_choice = input("Choose: ").strip()
 
-    hp = 30
-    gold = 10
-    inventory = []
+    if start_choice == "2":
+        filename = input("Enter filename to load (e.g., save1.json): ").strip()
+        data = gf.load_game(filename)
+        name = data.get("name", "Adventurer")
+        hp = data.get("hp", 30)
+        gold = data.get("gold", 10)
+        inventory = data.get("inventory", [])
+    else:
+        name = input("Enter your name: ").strip() or "Adventurer"
+        gf.print_welcome(name)
+        hp = 30
+        gold = 10
+        inventory = []
 
     while True:
         print(f"\nYou are in town.\nCurrent HP: {hp}, Gold: {gold}")
         print("1) Leave town (Fight Monster)")
         print("2) Sleep (Restore HP for 5 Gold)")
         print("3) View Inventory")
-        print("4) Quit")
+        print("4) Save and Quit")
 
         choice = input("Choose: ").strip()
 
@@ -87,7 +99,9 @@ def main():
         elif choice == "3":
             view_inventory(inventory)
         elif choice == "4":
-            print("Bye!")
+            filename = input("Enter filename to save (e.g., save1.json): ").strip()
+            gf.save_game(filename, name, hp, gold, inventory)
+            print("Game saved! Goodbye.")
             break
         else:
             print("Error, try again.")
