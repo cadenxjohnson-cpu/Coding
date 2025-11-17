@@ -22,11 +22,122 @@ Typical usage example:
   monster = gf.random_monster()
 """
 
+import pygame
+
+TILE_SIZE = 32
+GRID_SIZE = 10
+SCREEN_SIZE = GRID_SIZE * TILE_SIZE
+
+DEFAULT_MAP_STATE = {
+    "player_x": 0,
+    "player_y": 0,
+    "town_x": 0,
+    "town_y": 0,
+    "monster_x": 5,
+    "monster_y": 5,
+    "left_town": False
+}
+
 from __future__ import annotations
 
 import json
 import random
 from typing import Dict, List, Tuple
+
+def run_map(map_state: dict):
+    pygame.init()
+    screen = pygame.display.set_mode((SCREEN_SIZE, SCREEN_SIZE))
+    pygame.display.set_caption("Adventure Map")
+    clock = pygame.time.Clock()
+
+    # unpack state
+    px = map_state["player_x"]
+    py = map_state["player_y"]
+    tx = map_state["town_x"]
+    ty = map_state["town_y"]
+    mx = map_state["monster_x"]
+    my = map_state["monster_y"]
+    left = map_state["left_town"]
+
+    running = True
+    result = None
+
+    while running:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                pygame.quit()
+                return "quit_no_save", map_state
+
+            if event.type == pygame.KEYDOWN:
+                dx = dy = 0
+                if event.key == pygame.K_UP: dy = -1
+                elif event.key == pygame.K_DOWN: dy = 1
+                elif event.key == pygame.K_LEFT: dx = -1
+                elif event.key == pygame.K_RIGHT: dx = 1
+
+                nx = px + dx
+                ny = py + dy
+
+                if 0 <= nx < GRID_SIZE and 0 <= ny < GRID_SIZE:
+                    px, py = nx, ny
+                    map_state["player_x"] = px
+                    map_state["player_y"] = py
+
+                    if not left and (px != tx or py != ty):
+                        left = True
+                        map_state["left_town"] = True
+
+                    if px == tx and py == ty and left:
+                        result = "town"
+                        running = False
+                        break
+
+                    if px == mx and py == my:
+                        result = "monster"
+                        running = False
+                        break
+
+        # draw scene
+        screen.fill((0, 0, 0))
+
+        # grid lines
+        for gx in range(GRID_SIZE):
+            for gy in range(GRID_SIZE):
+                pygame.draw.rect(
+                    screen,
+                    (60, 60, 60),
+                    (gx * TILE_SIZE, gy * TILE_SIZE, TILE_SIZE, TILE_SIZE),
+                    1
+                )
+
+        # town
+        pygame.draw.circle(
+            screen,
+            (0, 255, 0),
+            (tx * TILE_SIZE + 16, ty * TILE_SIZE + 16),
+            12
+        )
+
+        # monster
+        pygame.draw.circle(
+            screen,
+            (255, 0, 0),
+            (mx * TILE_SIZE + 16, my * TILE_SIZE + 16),
+            12
+        )
+
+        # player
+        pygame.draw.rect(
+            screen,
+            (0, 0, 255),
+            (px * TILE_SIZE, py * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+        )
+
+        pygame.display.flip()
+        clock.tick(30)
+
+    pygame.quit()
+    return result, map_state
 
 
 def print_welcome(name: str, width: int = 20) -> None:
@@ -175,30 +286,37 @@ def test_functions() -> None:
     print(m['description'])
 
 
-def save_game(filename, inventory, gold, hp):
-    """Save the current game state to a file in JSON format."""
-    game_state = {
-        "inventory": inventory,
+def save_game(filename, name, hp, gold, inventory, map_state):
+    data = {
+        "name": name,
+        "hp": hp,
         "gold": gold,
-        "hp": hp
+        "inventory": inventory,
+        "map_state": map_state
     }
-    with open(filename, 'w') as file:
-        json.dump(game_state, file)
-    print(f"Game saved successfully as {filename}!")
+    with open(filename, "w") as f:
+        json.dump(data, f)
 
 def load_game(filename):
-    """Load a previously saved game from a file."""
     try:
-        with open(filename, 'r') as file:
-            game_state = json.load(file)
-        print(f"Game loaded successfully from {filename}!")
-        return game_state
+        with open(filename, "r") as f:
+            data = json.load(f)
+
+        # map_state exists
+        if "map_state" not in data:
+            data["map_state"] = DEFAULT_MAP_STATE.copy()
+
+        return data
     except FileNotFoundError:
-        print("Save file not found. Starting a new game instead.")
-        return {"inventory": [], "gold": 10, "hp": 30}
-
-
+        print("Save not found, starting new game.")
+        return {
+            "name": "Adventurer",
+            "hp": 30,
+            "gold": 10,
+            "inventory": [],
+            "map_state": DEFAULT_MAP_STATE.copy()
+        }
 if __name__ == "__main__":
-    # When this file is run directly, exercise the functions.
+   .
     test_functions()
 
