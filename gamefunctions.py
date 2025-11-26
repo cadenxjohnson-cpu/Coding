@@ -1,28 +1,27 @@
 """Adventure Game utility functions and test
 
-This module provides functions for a text-based adventure
-game. It includes a print welcome banner, display a shop
+provides functions for a text-based adventure
+game, print welcome banner, display a shop
 menu, purchase items given a budget, and generate a random monster
-encounter.  Functions are designed to be imported and used by another
+encounter
 file (game.py).
 
+
+
 Dependencies:
- Only Python standard library: random
-
-Usage:
-  Import this module in another script and call the functions.  To run
-  the built-in demonstrations, execute this file directly.
-
-Typical usage example:
-
-  import gamefunctions as gf
-  gf.print_welcome("Ada")
-  gf.print_shop_menu("Sword", "Shield", "Potion")
-  qty, money = gf.purchase_item(15.0, 42.0, quantity_to_purchase=3)
-  monster = gf.random_monster()
+  - Python standard library: json, random, typing
+  - pygame
 """
 
+from __future__ import annotations
+
+import json
+import random
+from typing import Dict, List, Tuple
+
 import pygame
+
+from wanderingMonster import WanderingMonster
 
 TILE_SIZE = 32
 GRID_SIZE = 10
@@ -33,31 +32,142 @@ DEFAULT_MAP_STATE = {
     "player_y": 0,
     "town_x": 0,
     "town_y": 0,
-    "monster_x": 5,
-    "monster_y": 5,
-    "left_town": False
+    # runtime: list[WanderingMonster]; will be serialized for saves
+    "monsters": [],
+    "left_town": False,
+    "player_move_count": 0,
+    # index of monster tile we last collided with (for combat resolution)
+    "last_monster_index": None,
 }
 
-from __future__ import annotations
 
-import json
-import random
-from typing import Dict, List, Tuple
+def serialize_monsters(monsters: List[WanderingMonster]) -> List[dict]:
+    """Convert WanderingMonster objects into plain dicts for JSON save."""
+    data: List[dict] = []
+    for m in monsters:
+        data.append(
+            {
+                "name": m.name,
+                "row": m.row,
+                "col": m.col,
+                "color": list(m.color),
+                "health": m.health,
+                "power": m.power,
+                "money": m.money,
+            }
+        )
+    return data
+
+
+def deserialize_monsters(raw_list: List[dict]) -> List[WanderingMonster]:
+    """Convert dicts loaded from JSON back into WanderingMonster objects."""
+    monsters: List[WanderingMonster] = []
+    for d in raw_list:
+        monsters.append(
+            WanderingMonster(
+                name=d["name"],
+                row=d["row"],
+                col=d["col"],
+                color=tuple(d["color"]),
+                health=d["health"],
+                power=d["power"],
+                money=d["money"],
+            )
+        )
+    return monsters
+
+
+def ensure_two_monsters(map_state: dict) -> None:
+    """
+    Make sure there are at least two wandering monsters on the map.
+
+    Called when the player enters the map and when all monsters
+    have been defeated.
+    """
+    monsters: List[WanderingMonster] = map_state.get("monsters")
+    if monsters is None or not isinstance(monsters, list):
+        monsters = []
+        map_state["monsters"] = monsters
+
+    # if this came from a JSON load and still holds dicts, convert them
+    if monsters and isinstance(monsters[0], dict):
+        monsters = deserialize_monsters(monsters)
+        map_state["monsters"] = monsters
+
+    # Already have 2 or more
+    if len(monsters) >= 2:
+        return
+
+    px = map_state.get("player_x", 0)
+    py = map_state.get("player_y", 0)
+    tx = map_state.get("town_x", 0)
+    ty = map_state.get("town_y", 0)
+
+    town_pos = (ty, tx)  # (row, col)
+    occupied = {(py, px), town_pos}
+    for m in monsters:
+        occupied.add(m.pos())
+
+    while len(monsters) < 2:
+        new_m = WanderingMonster.new_random_monster(
+            max_rows=GRID_SIZE,
+            max_cols=GRID_SIZE,
+            occupied_cells=occupied,
+            town_pos=town_pos,
+        )
+        monsters.append(new_m)
+        occupied.add(new_m.pos())
+
+
+def move_monsters(map_state: dict) -> None:
+    """Move all monsters one step (randomly), avoiding town and each other."""
+    monsters: List[WanderingMonster] = map_state.get("monsters", [])
+    tx = map_state.get("town_x", 0)
+    ty = map_state.get("town_y", 0)
+    town_pos = (ty, tx)
+
+    for m in monsters:
+        # other monsters + town are blocked
+        blocked = {town_pos}
+        for other in monsters:
+            if other is not m:
+                blocked.add(other.pos())
+
+        # temporarily remove current position from blocked to allow moving out
+        blocked.discard(m.pos())
+
+        m.move_random(
+            max_rows=GRID_SIZE,
+            max_cols=GRID_SIZE,
+            blocked_cells=blocked,
+        )
+
 
 def run_map(map_state: dict):
+    """
+    Pygame map loop.
+
+    Returns:
+      - ("quit_no_save", map_state) if window closed.
+      - ("town", map_state) if the player returns to the town tile.
+      - ("monster", map_state) if the player steps on a monster tile.
+    """
     pygame.init()
     screen = pygame.display.set_mode((SCREEN_SIZE, SCREEN_SIZE))
     pygame.display.set_caption("Adventure Map")
     clock = pygame.time.Clock()
 
     # unpack state
-    px = map_state["player_x"]
-    py = map_state["player_y"]
-    tx = map_state["town_x"]
-    ty = map_state["town_y"]
-    mx = map_state["monster_x"]
-    my = map_state["monster_y"]
-    left = map_state["left_town"]
+    px = map_state.get("player_x", 0)
+    py = map_state.get("player_y", 0)
+    tx = map_state.get("town_x", 0)
+    ty = map_state.get("town_y", 0)
+    left = map_state.get("left_town", False)
+    player_move_count = map_state.get("player_move_count", 0)
+
+    # ensure monsters list exists & has two monsters
+    ensure_two_monsters(map_state)
+    monsters: List[WanderingMonster] = map_state["monsters"]
 
     running = True
     result = None
@@ -70,10 +180,14 @@ def run_map(map_state: dict):
 
             if event.type == pygame.KEYDOWN:
                 dx = dy = 0
-                if event.key == pygame.K_UP: dy = -1
-                elif event.key == pygame.K_DOWN: dy = 1
-                elif event.key == pygame.K_LEFT: dx = -1
-                elif event.key == pygame.K_RIGHT: dx = 1
+                if event.key == pygame.K_UP:
+                    dy = -1
+                elif event.key == pygame.K_DOWN:
+                    dy = 1
+                elif event.key == pygame.K_LEFT:
+                    dx = -1
+                elif event.key == pygame.K_RIGHT:
+                    dx = 1
 
                 nx = px + dx
                 ny = py + dy
@@ -83,19 +197,32 @@ def run_map(map_state: dict):
                     map_state["player_x"] = px
                     map_state["player_y"] = py
 
+                    # mark that we left town once we step off the town tile
                     if not left and (px != tx or py != ty):
                         left = True
                         map_state["left_town"] = True
 
+                    # every time the player actually moves, increment counter
+                    player_move_count += 1
+                    map_state["player_move_count"] = player_move_count
+
+                    # move monsters every other time the player moves
+                    if player_move_count % 2 == 0:
+                        move_monsters(map_state)
+
+                    # returning to town after leaving
                     if px == tx and py == ty and left:
                         result = "town"
                         running = False
                         break
 
-                    if px == mx and py == my:
-                        result = "monster"
-                        running = False
-                        break
+                    # collision with any monster triggers combat
+                    for idx, m in enumerate(monsters):
+                        if px == m.col and py == m.row:
+                            map_state["last_monster_index"] = idx
+                            result = "monster"
+                            running = False
+                            break
 
         # draw scene
         screen.fill((0, 0, 0))
@@ -107,30 +234,31 @@ def run_map(map_state: dict):
                     screen,
                     (60, 60, 60),
                     (gx * TILE_SIZE, gy * TILE_SIZE, TILE_SIZE, TILE_SIZE),
-                    1
+                    1,
                 )
 
-        # town
+        # town (green circle)
         pygame.draw.circle(
             screen,
             (0, 255, 0),
-            (tx * TILE_SIZE + 16, ty * TILE_SIZE + 16),
-            12
+            (tx * TILE_SIZE + TILE_SIZE // 2, ty * TILE_SIZE + TILE_SIZE // 2),
+            TILE_SIZE // 2 - 4,
         )
 
-        # monster
-        pygame.draw.circle(
-            screen,
-            (255, 0, 0),
-            (mx * TILE_SIZE + 16, my * TILE_SIZE + 16),
-            12
-        )
+        # wandering monsters (colored circles by type)
+        for m in monsters:
+            pygame.draw.circle(
+                screen,
+                m.color,
+                (m.col * TILE_SIZE + TILE_SIZE // 2, m.row * TILE_SIZE + TILE_SIZE // 2),
+                TILE_SIZE // 2 - 4,
+            )
 
-        # player
+        # player (blue square)
         pygame.draw.rect(
             screen,
             (0, 0, 255),
-            (px * TILE_SIZE, py * TILE_SIZE, TILE_SIZE, TILE_SIZE)
+            (px * TILE_SIZE, py * TILE_SIZE, TILE_SIZE, TILE_SIZE),
         )
 
         pygame.display.flip()
@@ -141,15 +269,7 @@ def run_map(map_state: dict):
 
 
 def print_welcome(name: str, width: int = 20) -> None:
-    """Display a centered welcome message for the player.
-
-    Args:
-      name (str): The player's name to include in the greeting.
-      width (int, optional): The total banner width. Defaults to 20.
-
-    Returns:
-      None
-    """
+    """Display a centered welcome message for the player."""
     message = f"Hello, {name}!"
     print(f"{message:^{width}}")
 
@@ -160,21 +280,7 @@ def print_shop_menu(
     item3: str,
     prices: List[float] | None = None,
 ) -> None:
-    """Print a shop menu listing three items and their prices.
-
-    Args:
-      item1 (str): The first item name.
-      item2 (str): The second item name.
-      item3 (str): The third item name.
-      prices (list[float] | None, optional): The prices for the three
-        items in order. If omitted, defaults to [25, 40, 15].
-
-    Returns:
-      None
-
-    Example:
-      >>> print_shop_menu("Sword", "Shield", "Potion", [25, 40, 15])
-    """
+    """Print a shop menu listing three items and their prices."""
     if prices is None:
         prices = [25.0, 40.0, 15.0]
     print("\nWelcome to the shop! Here are your options:")
@@ -189,20 +295,7 @@ def purchase_item(
     starting_money: float,
     quantity_to_purchase: int = 1,
 ) -> Tuple[int, float]:
-    """Calculate how many items can be bought and the leftover money.
-
-    Args:
-      item_price (float): The cost of a single item.
-      starting_money (float): The player's available money.
-      quantity_to_purchase (int): The requested quantity to buy.
-
-    Returns:
-      tuple[int, float]: (quantity_purchased, remaining_money)
-
-    Example:
-      >>> purchase_item(15.0, 50.0, 3)
-      (3, 5.0)
-    """
+    """Calculate how many items can be bought and the leftover money."""
     if item_price <= 0:
         return 0, starting_money
     max_quantity = int(starting_money // item_price)
@@ -212,21 +305,7 @@ def purchase_item(
 
 
 def random_monster() -> Dict[str, object]:
-    """Generate a random monster encounter with stats and description.
-
-    Returns:
-      dict: A dictionary containing:
-        - name (str): Monster type.
-        - description (str): Flavored text for the encounter.
-        - health (int): Monster hit points.
-        - power (int): Monster attack power.
-        - money (float): Gold dropped on victory.
-
-    Example:
-      >>> m = random_monster()
-      >>> list(m.keys())
-      ['name', 'description', 'health', 'power', 'money']
-    """
+    """Generate a random monster encounter with stats and description."""
     monster_names = ["Goblin", "Giant Spider", "Ogre"]
     name = random.choice(monster_names)
 
@@ -264,11 +343,7 @@ def random_monster() -> Dict[str, object]:
 
 
 def test_functions() -> None:
-    """Lightweight tests/demonstrations for this module.
-
-    Runs if the module is executed directly.  Does not require any
-    input from the user.
-    """
+    """Lightweight tests/demonstrations for this module."""
     print("== test: print_welcome ==")
     print_welcome("Tester", width=24)
 
@@ -287,25 +362,48 @@ def test_functions() -> None:
 
 
 def save_game(filename, name, hp, gold, inventory, map_state):
+    # Make a shallow copy so we don't mutate the runtime map_state
+    map_state_copy = dict(map_state)
+
+    # Serialize monsters if needed
+    monsters = map_state_copy.get("monsters", [])
+    if monsters and isinstance(monsters[0], WanderingMonster):
+        map_state_copy["monsters"] = serialize_monsters(monsters)
+
     data = {
         "name": name,
         "hp": hp,
         "gold": gold,
         "inventory": inventory,
-        "map_state": map_state
+        "map_state": map_state_copy,
     }
     with open(filename, "w") as f:
         json.dump(data, f)
+
 
 def load_game(filename):
     try:
         with open(filename, "r") as f:
             data = json.load(f)
 
-        # map_state exists
-        if "map_state" not in data:
-            data["map_state"] = DEFAULT_MAP_STATE.copy()
+        map_state = data.get("map_state", DEFAULT_MAP_STATE.copy())
 
+        # Backwards compatibility: if old keys exist but no monsters list,
+        # start with an empty monster list (we'll spawn when entering map).
+        if "monsters" not in map_state:
+            map_state["monsters"] = []
+
+        # Ensure left_town and counters exist
+        map_state.setdefault("left_town", False)
+        map_state.setdefault("player_move_count", 0)
+        map_state.setdefault("last_monster_index", None)
+
+        # If monsters are stored as dicts, convert back to objects
+        monsters = map_state.get("monsters", [])
+        if monsters and isinstance(monsters[0], dict):
+            map_state["monsters"] = deserialize_monsters(monsters)
+
+        data["map_state"] = map_state
         return data
     except FileNotFoundError:
         print("Save not found, starting new game.")
@@ -314,9 +412,9 @@ def load_game(filename):
             "hp": 30,
             "gold": 10,
             "inventory": [],
-            "map_state": DEFAULT_MAP_STATE.copy()
+            "map_state": DEFAULT_MAP_STATE.copy(),
         }
-if __name__ == "__main__":
-   .
-    test_functions()
 
+
+if __name__ == "__main__":
+    test_functions()
