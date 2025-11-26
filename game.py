@@ -1,16 +1,22 @@
+from __future__ import annotations
 """
 text based adventure game that uses functions from gamefunctions.py
 """
 
-from __future__ import annotations
 import random
 import gamefunctions as gf
 
 
 def fight_monster(name, hp, gold, inventory):
-    """Monster fight loop."""
+    """Monster fight loop.
+
+    Returns:
+      tuple: (hp, gold, inventory, monster_defeated)
+    """
     monster = gf.random_monster()
     print(f"\nA wild {monster['name']} appears (HP {monster['health']}, Power {monster['power']})")
+
+    monster_defeated = False
 
     while hp > 0 and monster["health"] > 0:
         print(f"\n{name}'s HP: {hp} | {monster['name']}'s HP: {monster['health']}")
@@ -33,6 +39,7 @@ def fight_monster(name, hp, gold, inventory):
         print("You fainted, You wake up back in town with 10 HP.")
         hp = 10
     elif monster["health"] <= 0:
+        monster_defeated = True
         print(f"You defeated the {monster['name']} and earned {monster['money']} gold.")
         gold += monster["money"]
 
@@ -42,7 +49,7 @@ def fight_monster(name, hp, gold, inventory):
             inventory.append(item)
             print(f"You found a {item['name']}")
 
-    return hp, gold, inventory
+    return hp, gold, inventory, monster_defeated
 
 
 def view_inventory(inventory):
@@ -97,13 +104,24 @@ def main():
                 return
 
             if action == "monster":
-                hp, gold, inventory = fight_monster(name, hp, gold, inventory)
+                hp, gold, inventory, defeated = fight_monster(name, hp, gold, inventory)
 
                 if hp <= 0:
                     print("You died. Game Over.")
                     break
 
-                # After the fight, return to the same tile
+                # If the monster was defeated, remove it from the map_state
+                if defeated:
+                    monsters = map_state.get("monsters", [])
+                    idx = map_state.get("last_monster_index")
+                    if isinstance(idx, int) and 0 <= idx < len(monsters):
+                        monsters.pop(idx)
+
+                    # If no monsters remain, spawn two new ones
+                    if not monsters:
+                        gf.ensure_two_monsters(map_state)
+
+                # After the fight, return to the same tile / map
                 action, map_state = gf.run_map(map_state)
                 if action == "quit_no_save":
                     print("Game closed without saving.")
